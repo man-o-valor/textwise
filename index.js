@@ -6,7 +6,10 @@ const Sharp = require("sharp");
 const { createCanvas, GlobalFonts } = require("@napi-rs/canvas");
 const opentype = require("opentype.js");
 
+const baseDir = process.pkg ? path.dirname(process.execPath) : __dirname;
+
 function hexToRgb(hex) {
+	// Take a guess as to what this one does
 	hex = hex.replace(/^#/, "");
 	if (hex.length === 3)
 		hex = hex
@@ -18,10 +21,17 @@ function hexToRgb(hex) {
 }
 
 function distSq(r1, g1, b1, r2, g2, b2) {
+	// Calculate color distance in rgb using the 3-dimensional Pythagorean Theorem
 	const dr = r1 - r2,
 		dg = g1 - g2,
 		db = b1 - b2;
 	return dr * dr + dg * dg + db * db;
+}
+
+async function loadImage(filePath) {
+	const img = Sharp(filePath);
+	const { data, info } = await img.ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+	return { data, width: info.width, height: info.height };
 }
 
 async function saveImage(outBuffer, width, height, outPath) {
@@ -32,6 +42,7 @@ async function saveImage(outBuffer, width, height, outPath) {
 }
 
 async function loadBitmapGlyphs(selectedFontName, solidBackground = false) {
+	// Loads glyphs from bitmap spritesheets
 	if (!selectedFontName) return null;
 
 	const info = fontInfoArray.find((f) => f.font_name === selectedFontName);
@@ -64,6 +75,7 @@ async function loadBitmapGlyphs(selectedFontName, solidBackground = false) {
 	}
 	const glyphDictionary = [];
 
+	// Add glyphs to dictionary
 	for (let ry = 0; ry < fontRows; ry++) {
 		for (let rx = 0; rx < fontColumns; rx++) {
 			const left = rx * glyphWidth;
@@ -87,6 +99,8 @@ async function loadBitmapGlyphs(selectedFontName, solidBackground = false) {
 			let glyphCoverage = covered / total;
 
 			if (!solidBackground && glyphCoverage > 0.5) {
+				// If the glyph covers more than half of its bounding box, store its inverse UNLESS the user chose a solid background
+				// This helps choose glyphs later by ensuring that chosen glyph background colors are always the majority of the pixel
 				let newCovered = 0;
 				for (let i = 0; i < data.length; i += 4) {
 					const currentAlpha = data[i + 3];
@@ -115,6 +129,7 @@ async function loadBitmapGlyphs(selectedFontName, solidBackground = false) {
 }
 
 async function loadVectorGlyphs(ttfFileName, glyphWidth, latinOnly = true, solidBackground = false) {
+	// Loads glyphs from, you guessed it, TTF files
 	ttfFileName = ttfFileName + ".ttf";
 	const ttfPath = path.join(fontsDir, ttfFileName);
 	const fontName = ttfFileName.replace(/\.ttf$/i, "");
@@ -124,6 +139,7 @@ async function loadVectorGlyphs(ttfFileName, glyphWidth, latinOnly = true, solid
 	let chars = [];
 
 	if (latinOnly) {
+		// If the user enabled the use of only latin characters, only store ones from 32-126
 		for (let charCode = 32; charCode <= 126; charCode++) {
 			chars.push(String.fromCharCode(charCode));
 		}
@@ -147,6 +163,7 @@ async function loadVectorGlyphs(ttfFileName, glyphWidth, latinOnly = true, solid
 		}
 	}
 
+	// Create a virtual 100x100 canvas to render and snapshot glyphs on so we can do pixel calculations later
 	const tempCanvas = createCanvas(100, 100);
 	const tempCtx = tempCanvas.getContext("2d");
 	tempCtx.font = `100px "${fontName}"`;
@@ -159,6 +176,7 @@ async function loadVectorGlyphs(ttfFileName, glyphWidth, latinOnly = true, solid
 	const ctx = canvas.getContext("2d");
 	const glyphDictionary = [];
 
+	// Add glyphs to dictionary
 	for (const char of chars) {
 		ctx.clearRect(0, 0, glyphWidth, glyphHeight);
 		ctx.fillStyle = "black";
@@ -178,6 +196,8 @@ async function loadVectorGlyphs(ttfFileName, glyphWidth, latinOnly = true, solid
 		let glyphCoverage = covered / total;
 
 		if (!solidBackground && glyphCoverage > 0.5) {
+			// If the glyph covers more than half of its bounding box, store its inverse UNLESS the user chose a solid background
+			// This helps choose glyphs later by ensuring that chosen glyph background colors are always the majority of the pixel
 			let newCovered = 0;
 			for (let i = 0; i < data.length; i += 4) {
 				data[i + 3] = 255 - data[i + 3];
@@ -201,8 +221,10 @@ async function loadVectorGlyphs(ttfFileName, glyphWidth, latinOnly = true, solid
 }
 
 function generateGradient(width, height, pointsCount, colorsArray) {
+	// Generates a procedural gradient based on number of points and available colors
 	const buf = Buffer.alloc(width * height * 4);
 
+	// Use grayscale colors if none provided
 	const useColors = Array.isArray(colorsArray) && colorsArray.length > 0;
 	const levels = [];
 	if (!useColors) {
@@ -215,6 +237,7 @@ function generateGradient(width, height, pointsCount, colorsArray) {
 		}
 	}
 
+	// Use rejection sampling to place gradient points far away from each other
 	const points = [];
 	if (pointsCount <= 1) {
 		const x = Math.random() * (width - 1);
@@ -258,6 +281,7 @@ function generateGradient(width, height, pointsCount, colorsArray) {
 					break;
 				}
 			}
+			// Fallback case, if placing a point isnt possible then don't worry about rejection sampling
 			if (!placed) {
 				const x = Math.random() * (width - 1);
 				const y = Math.random() * (height - 1);
@@ -272,6 +296,7 @@ function generateGradient(width, height, pointsCount, colorsArray) {
 		}
 	}
 
+	// Use a gaussian sigma function to make gradients appear smoother and less point-based
 	const base = Math.min(width, height);
 	const sigma = Math.max(1, (base * 0.5) / Math.sqrt(pointsCount));
 	const twoSigma2 = 2 * sigma * sigma;
@@ -306,6 +331,7 @@ function generateGradient(width, height, pointsCount, colorsArray) {
 }
 
 function channelRanges(pixels) {
+	// Finds the ranges of each color channel in an array of pixels
 	const mins = [255, 255, 255];
 	const maxs = [0, 0, 0];
 	for (const p of pixels) {
@@ -324,6 +350,7 @@ function channelRanges(pixels) {
 }
 
 function splitBox(pixels) {
+	// Splits a cluster assignment box to add a new color to the palette
 	if (pixels.length <= 1) return [pixels, []];
 	const { ranges } = channelRanges(pixels);
 	let channel = 0;
@@ -335,6 +362,7 @@ function splitBox(pixels) {
 }
 
 function averageColor(pixels) {
+	// Finds the average color of an array of pixels
 	if (pixels.length === 0) return { r: 0, g: 0, b: 0 };
 	let r = 0,
 		g = 0,
@@ -349,6 +377,7 @@ function averageColor(pixels) {
 }
 
 async function quantizeImage(imgData, paletteSize, forcedPalette) {
+	// Crushes an image down to a set palette, defined by the number of colors to use
 	const { data, width, height } = imgData;
 	const pixels = [];
 	for (let i = 0; i < data.length; i += 4) {
@@ -378,6 +407,7 @@ async function quantizeImage(imgData, paletteSize, forcedPalette) {
 
 	const computedPalette = boxes.map(averageColor);
 
+	// If forcedPalette is provided use those colors first before populating with derived colors
 	let finalPalette = [];
 	if (Array.isArray(forcedPalette) && forcedPalette.length > 0) {
 		finalPalette = forcedPalette.map((c) => ({ r: c.r, g: c.g, b: c.b }));
@@ -428,6 +458,7 @@ async function quantizeImage(imgData, paletteSize, forcedPalette) {
 }
 
 async function pixelateBufferResize(buf, width, height, blockW, blockH) {
+	// Downsample an image with respect to the modal color, using the blockW and blockH as finished "pixel" dimensions
 	const sw = Math.max(1, Math.floor(width / blockW));
 	const sh = Math.max(1, Math.floor(height / blockH));
 	const small = Buffer.alloc(sw * sh * 4);
@@ -470,12 +501,8 @@ async function pixelateBufferResize(buf, width, height, blockW, blockH) {
 	return { data: small, width: sw, height: sh };
 }
 
-// Robust path resolution safe for pkg snapshot virtual filesystem vs standard node runtime
-const baseDir = typeof process.pkg !== 'undefined' 
-	? path.dirname(process.execPath) 
-	: __dirname;
-
-const fontsDir = path.join(__dirname, "fonts");
+// Parse font metadata and provided fonts
+const fontsDir = path.join(baseDir, "fonts");
 const infoPath = path.join(fontsDir, "font-info.json");
 let fontInfoArray = [];
 let availableFonts = [];
@@ -485,17 +512,39 @@ try {
 } catch (e) {
 	console.error("🚫 Failed to parse font-info.json: ", e);
 }
+const fontFiles = fs.readdirSync(fontsDir);
+const ttfFiles = fontFiles.filter((f) => f.toLowerCase().endsWith(".ttf"));
+availableFonts = availableFonts.concat(ttfFiles.map((str) => str.slice(0, -4)));
 
-let ttfFiles = [];
+const inputDir = path.join(baseDir, "input");
+let detectedImages = [];
 try {
-	const fontFiles = fs.readdirSync(fontsDir);
-	ttfFiles = fontFiles.filter((f) => f.toLowerCase().endsWith(".ttf"));
-	availableFonts = availableFonts.concat(ttfFiles.map((str) => str.slice(0, -4)));
+	const inputFiles = fs.readdirSync(inputDir);
+	detectedImages = inputFiles.filter((file) => /\.(png|jpg|jpeg)$/i.test(file));
 } catch (e) {
-	console.error("🚫 Could not read fonts directory:", e);
+	console.error("🤔 Input folder not detected");
 }
 
 const questions = [
+	// Question time
+	{
+		type: "list",
+		name: "imageSetting",
+		message: "🖌️ Choose image type:",
+		choices: ["📄 From File", "🌈 Gradient"],
+		default: "📄 From File",
+	},
+	{
+		type: detectedImages.length > 0 ? "list" : "input",
+		name: "imagePath",
+		message: detectedImages.length > 0 ? "🖼️ Choose an image from the input folder:" : "🤔 No images found in ./input. Enter local filepath manually:",
+		choices: detectedImages.length > 0 ? detectedImages : undefined,
+		when: (answers) => answers.imageSetting !== "🌈 Gradient",
+		validate: (input) => {
+			if (detectedImages.length > 0) return true;
+			return fs.existsSync(input) ? true : "🤔 File path does not exist";
+		},
+	},
 	{
 		type: "input",
 		name: "paletteSize",
@@ -508,8 +557,20 @@ const questions = [
 	},
 	{
 		type: "input",
+		name: "pixelSize",
+		message: "🔠 Enter font size:",
+		default: "8",
+		when: (answers) => answers.imageSetting !== "🌈 Gradient",
+		validate: (input) => {
+			const val = parseInt(input);
+			return val > 0 ? true : "🤔 Pixel size must be a positive integer";
+		},
+	},
+	{
+		type: "input",
 		name: "gradientColorsInput",
 		message: "🎛️ Enter hex colors of the gradient, separated by spaces:",
+		when: (answers) => answers.imageSetting === "🌈 Gradient",
 		validate: (input) => {
 			if (!input || input.trim().length === 0) return true;
 			const parts = input.trim().split(/\s+/);
@@ -523,7 +584,8 @@ const questions = [
 		type: "input",
 		name: "gradientPointsNumber",
 		message: "🔅 Enter the number of gradient points:",
-		default: (answers) => answers.gradientColorsInput?.trim().match(/\s+/g)?.length + 1 || "8",
+		when: (answers) => answers.imageSetting === "🌈 Gradient",
+		default: (answers) => answers.gradientColorsInput?.trim()?.match(/\s+/g)?.length + 1 || "8",
 		validate: (input) => {
 			const val = parseInt(input);
 			return !isNaN(val) && val > 0 ? true : "🤔 Gradient point count must be a positive integer";
@@ -533,6 +595,7 @@ const questions = [
 		type: "input",
 		name: "resolutionWidth",
 		message: "📐 Enter the width of the gradient image in glyphs",
+		when: (answers) => answers.imageSetting === "🌈 Gradient",
 		default: "128",
 		validate: (input) => {
 			const val = parseInt(input);
@@ -543,6 +606,7 @@ const questions = [
 		type: "input",
 		name: "resolutionHeight",
 		message: "📐 Enter the height of the gradient image in glyphs",
+		when: (answers) => answers.imageSetting === "🌈 Gradient",
 		default: "128",
 		validate: (input) => {
 			const val = parseInt(input);
@@ -563,13 +627,13 @@ const questions = [
 		when: (answers) => answers.fontChoice && availableFonts.indexOf(answers.fontChoice) >= availableFonts.length - ttfFiles.length,
 		validate: (input) => {
 			const val = parseInt(input);
-			return !isNaN(val) && val > 0 ? true : "🤔 Resolution width must be a positive integer";
+			return !isNaN(val) && val > 0 ? true : "🤔 Gradient height count must be a positive integer";
 		},
 	},
 	{
 		type: "confirm",
 		name: "ttfLatinOnly",
-		message: "📜 Use latin characters only?",
+		message: "📜 Use latin characters only?", // Should be used for fonts with unwanted exotic glyphs
 		default: false,
 		when: (answers) => answers.fontChoice && availableFonts.indexOf(answers.fontChoice) >= availableFonts.length - ttfFiles.length,
 	},
@@ -592,14 +656,16 @@ const questions = [
 	{
 		type: "confirm",
 		name: "messy",
-		message: "🥴 Use messy glyphs?",
+		message: "🥴 Use messy glyphs?", // When Y, glyphs with identical coverage will be randomized to make flat areas more varied
 		default: true,
 	},
 ];
 
 async function run() {
+	// Ask prompts
 	const answers = await inquirerModule.prompt(questions);
 
+	// Load glyphs
 	let glyphs;
 	if (answers.fontChoice) {
 		try {
@@ -619,23 +685,36 @@ async function run() {
 		return;
 	}
 
+	// Get image path of selected input image (as long as the user didn't select Gradient)
+	let finalImagePath = null;
+	if (answers.imageSetting !== "🌈 Gradient") {
+		finalImagePath = detectedImages.includes(answers.imagePath) ? path.join(inputDir, answers.imagePath) : answers.imagePath;
+	}
+
 	try {
+		// Generate gradient or load input image
 		const paletteSize = Math.max(2, parseInt(answers.paletteSize) || 8);
 		let imgData;
 		let colorsArray = null;
-
-		const gw = Math.max(1, parseInt(answers.resolutionWidth || 128));
-		const gh = Math.max(1, parseInt(answers.resolutionHeight || 128));
-		let points = Math.max(1, parseInt(answers.gradientPointsNumber || 4));
-		if (answers.gradientColorsInput && answers.gradientColorsInput.trim().length > 0) {
-			const parts = answers.gradientColorsInput.trim().split(/\s+/);
-			colorsArray = parts.map((p) => hexToRgb(p));
-			points = Math.max(1, colorsArray.length);
+		if (answers.imageSetting === "🌈 Gradient") {
+			const gw = Math.max(1, parseInt(answers.resolutionWidth || 128));
+			const gh = Math.max(1, parseInt(answers.resolutionHeight || 128));
+			let points = Math.max(1, parseInt(answers.gradientPointsNumber || 4));
+			if (answers.gradientColorsInput && answers.gradientColorsInput.trim().length > 0) {
+				const parts = answers.gradientColorsInput.trim().split(/\s+/);
+				colorsArray = parts.map((p) => hexToRgb(p));
+				points = Math.max(1, colorsArray.length);
+			}
+			imgData = generateGradient(gw, gh, points, colorsArray);
+		} else {
+			imgData = await loadImage(finalImagePath);
 		}
-		imgData = generateGradient(gw, gh, points, colorsArray);
 
+		// Quantize to limited palette
 		const { outBuffer: quantizedBuffer, width, height, palette } = await quantizeImage(imgData, paletteSize, colorsArray);
 
+		// Downsample the image according to font size, with respect to the modal color in each glyph's bounding box
+		const pixelSize = answers.imageSetting === "🌈 Gradient" ? 1 : Math.max(1, parseInt(answers.pixelSize) || 1);
 		let finalBuffer = quantizedBuffer;
 		let originalBuffer = imgData.data;
 		let [finalWidth, finalHeight] = [width, height];
@@ -643,6 +722,17 @@ async function run() {
 		if (glyphs && Array.isArray(glyphs) && glyphs.length > 0) {
 			glyphWidth = glyphs[0].width;
 			glyphHeight = glyphs[0].height;
+		}
+		const minDim = Math.min(glyphWidth, glyphHeight);
+		const blockW = Math.max(1, Math.round(pixelSize * (glyphWidth / minDim)));
+		const blockH = Math.max(1, Math.round(pixelSize * (glyphHeight / minDim)));
+		if (blockW > 1 || blockH > 1) {
+			const small = await pixelateBufferResize(quantizedBuffer, width, height, blockW, blockH);
+			finalBuffer = small.data;
+			const smallOrig = await pixelateBufferResize(imgData.data, width, height, blockW, blockH);
+			originalBuffer = smallOrig.data;
+			finalWidth = small.width;
+			finalHeight = small.height;
 		}
 
 		if (!(Array.isArray(palette) && palette.length >= 2)) {
@@ -656,6 +746,7 @@ async function run() {
 
 		const paletteColors = palette.map((c) => ({ r: c.r, g: c.g, b: c.b }));
 
+		// If the user selected a solid background color, apply it
 		let globalBgColor = null;
 		if (answers.solidBackground) {
 			if (answers.bgColorPreference) {
@@ -671,6 +762,7 @@ async function run() {
 			}
 		}
 
+		// Choose and render glyphs
 		for (let sy = 0; sy < finalHeight; sy++) {
 			for (let sx = 0; sx < finalWidth; sx++) {
 				const sIdx = (sy * finalWidth + sx) * 4;
@@ -682,6 +774,7 @@ async function run() {
 				let primary, secondary, secWeight;
 
 				if (answers.solidBackground) {
+					// If the user chose a solid background, use the best color for glyphs
 					primary = globalBgColor;
 					let bestSecondary = -1;
 					let minSecondaryDist = Infinity;
@@ -703,6 +796,8 @@ async function run() {
 
 					secWeight = dp + ds === 0 ? 0 : 1 - ds / (dp + ds);
 				} else {
+					// If the user did not choose a solid background, use the second best color for glyphs
+					// Since glyphs were normalized earlier to all have <50% coverage glyphs are guaranteed to represent less color than their backgrounds
 					let best = -1,
 						second = -1,
 						bd = Infinity,
@@ -777,20 +872,43 @@ async function run() {
 		finalWidth = bigW;
 		finalHeight = bigH;
 
+		// Generate filename
 		const outDir = path.join(baseDir, "output");
-		if (!fs.existsSync(outDir)) fs.mkdirSync(outDir, { recursive: true });
-		
-		const base = `gradient-${Math.max(1, parseInt(answers.resolutionWidth || 128))}x${Math.max(1, parseInt(answers.resolutionHeight || 128))}`;
+		if (!fs.existsSync(outDir)) fs.mkdirSync(outDir);
+		const base =
+			answers.imageSetting === "🌈 Gradient"
+				? `gradient-${Math.max(1, parseInt(answers.resolutionWidth || 512))}x${Math.max(1, parseInt(answers.resolutionHeight || 512))}`
+				: path.basename(finalImagePath, path.extname(finalImagePath));
 		const outPath = path.join(
 			outDir,
-			`${base}-${paletteSize}col-${answers.fontChoice}${answers.solidBackground ? "-solid" : ""}.png`,
+			`${base}-${paletteSize}col-${answers.fontChoice}${pixelSize ? "-" + pixelSize : ""}px${answers.messy ? "-m" : ""}${answers.solidBackground ? "-solid" : ""}.png`,
 		);
 
+		// Save image
 		await saveImage(finalBuffer, finalWidth, finalHeight, outPath);
-		console.log("✅ Saved output image to:", outPath);
+		console.log("✅ Saved output image image to:", outPath);
 	} catch (err) {
 		console.error("🚫 Error processing image:", err);
 	}
 }
 
-run();
+async function loop() {
+	while (true) {
+		await run();
+
+		const againQuestion = {
+			type: "confirm",
+			name: "doAgain",
+			message: "🔄️ Generate another image?",
+			default: true,
+		};
+
+		let goAgain = await inquirerModule.prompt(againQuestion);
+
+		if (!goAgain.doAgain) {
+			break;
+		}
+	}
+}
+
+loop()
