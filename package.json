@@ -1,17 +1,32 @@
 {
-  "name": "textwise",
-  "version": "1.0.0",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "author": "Man-o-Valor",
-  "license": "ISC",
-  "description": "TUI-based textmode mosaic generator",
-  "dependencies": {
-    "@napi-rs/canvas": "^1.0.5",
-    "inquirer": "^8.2.7",
-    "opentype.js": "^2.0.0",
-    "sharp": "^0.35.3"
-  }
+	"name": "textwise",
+	"version": "1.0.0",
+	"main": "index.js",
+	"bin": "index.js",
+	"pkg": {
+		"assets": [
+			"fonts/**/*",
+			"node_modules/sharp/**/*",
+			"node_modules/@img/**/*",
+			"node_modules/@napi-rs/canvas/**/*"
+		],
+		"targets": [
+			"node18-win-x64"
+		]
+	},
+	"scripts": {
+		"test": "echo \"Error: no test specified\" && exit 1"
+	},
+	"author": "Man-o-Valor",
+	"license": "ISC",
+	"description": "TUI-based textmode mosaic generator",
+	"dependencies": {
+		"@napi-rs/canvas": "^1.0.5",
+		"inquirer": "^8.2.7",
+		"opentype.js": "^2.0.0",
+		"sharp": "^0.35.3"
+	},
+	"devDependencies": {
+		"pkg": "^5.8.1"
+	}
 }

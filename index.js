@@ -1,10 +1,12 @@
-console.log("📦 Unboxing packages...")
+console.log("📦 Unboxing packages...");
 const fs = require("fs");
 const path = require("path");
 const inquirerModule = require("inquirer");
 const Sharp = require("sharp");
 const { createCanvas, GlobalFonts } = require("@napi-rs/canvas");
 const opentype = require("opentype.js");
+
+const baseDir = process.pkg ? path.dirname(process.execPath) : __dirname;
 
 function hexToRgb(hex) {
 	// Take a guess as to what this one does
@@ -500,7 +502,7 @@ async function pixelateBufferResize(buf, width, height, blockW, blockH) {
 }
 
 // Parse font metadata and provided fonts
-const fontsDir = path.join(__dirname, "fonts");
+const fontsDir = path.join(baseDir, "fonts");
 const infoPath = path.join(fontsDir, "font-info.json");
 let fontInfoArray = [];
 let availableFonts = [];
@@ -514,10 +516,14 @@ const fontFiles = fs.readdirSync(fontsDir);
 const ttfFiles = fontFiles.filter((f) => f.toLowerCase().endsWith(".ttf"));
 availableFonts = availableFonts.concat(ttfFiles.map((str) => str.slice(0, -4)));
 
-const inputDir = path.join(__dirname, "input");
+const inputDir = path.join(baseDir, "input");
 let detectedImages = [];
-const inputFiles = fs.readdirSync(inputDir);
-detectedImages = inputFiles.filter((file) => /\.(png|jpg|jpeg)$/i.test(file));
+try {
+	const inputFiles = fs.readdirSync(inputDir);
+	detectedImages = inputFiles.filter((file) => /\.(png|jpg|jpeg)$/i.test(file));
+} catch (e) {
+	console.error("🤔 Input folder not detected");
+}
 
 const questions = [
 	// Question time
@@ -579,7 +585,7 @@ const questions = [
 		name: "gradientPointsNumber",
 		message: "🔅 Enter the number of gradient points:",
 		when: (answers) => answers.imageSetting === "🌈 Gradient",
-		default: (answers) => answers.gradientColorsInput?.trim().match(/\s+/g).length + 1 || "8",
+		default: (answers) => answers.gradientColorsInput?.trim()?.match(/\s+/g)?.length + 1 || "8",
 		validate: (input) => {
 			const val = parseInt(input);
 			return !isNaN(val) && val > 0 ? true : "🤔 Gradient point count must be a positive integer";
@@ -867,7 +873,7 @@ async function run() {
 		finalHeight = bigH;
 
 		// Generate filename
-		const outDir = path.join(__dirname, "output");
+		const outDir = path.join(baseDir, "output");
 		if (!fs.existsSync(outDir)) fs.mkdirSync(outDir);
 		const base =
 			answers.imageSetting === "🌈 Gradient"
@@ -886,4 +892,23 @@ async function run() {
 	}
 }
 
-run();
+async function loop() {
+	while (true) {
+		await run();
+
+		const againQuestion = {
+			type: "confirm",
+			name: "doAgain",
+			message: "🔄️ Generate another image?",
+			default: true,
+		};
+
+		let goAgain = await inquirerModule.prompt(againQuestion);
+
+		if (!goAgain.doAgain) {
+			break;
+		}
+	}
+}
+
+loop()
