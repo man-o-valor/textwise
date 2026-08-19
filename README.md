@@ -17,11 +17,11 @@ To add an image to the input pool, move it to the input/ folder. Supported forma
 
 ## Included fonts
 
-Included are 7 fonts to choose from for image generation.
-`PETSCII` from the Commodore 64
-`FrogBlock` by Polyducks on Itch
-`DinoByte` by Mby on Itch
-`Rook` by autojunkio on Itch, published by outer spec on Itch
-`UrsaFont` by ursafrank on Itch
-`MovType` by me!
-`Roboto Mono` by Christian Robertson (open-sourced by Google)
+Included are 7 fonts to choose from for image generation.  
+`PETSCII` from the Commodore 64  
+`FrogBlock` by Polyducks on Itch  
+`DinoByte` by Mby on Itch  
+`Rook` by autojunkio on Itch, published by outer spec on Itch  
+`UrsaFont` by ursafrank on Itch  
+`MovType` by me!  
+`Roboto Mono` by Christian Robertson (open-sourced by Google)  
