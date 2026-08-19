@@ -5,9 +5,9 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
+  "author": "Man-o-Valor",
   "license": "ISC",
-  "description": "",
+  "description": "TUI-based textmode mosaic generator",
   "dependencies": {
     "@napi-rs/canvas": "^1.0.5",
     "inquirer": "^8.2.7",
