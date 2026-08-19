@@ -1,3 +1,4 @@
+console.log("📦 Unboxing packages...")
 const fs = require("fs");
 const path = require("path");
 const inquirerModule = require("inquirer");
