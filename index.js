@@ -21,11 +21,33 @@ function hexToRgb(hex) {
 }
 
 function distSq(r1, g1, b1, r2, g2, b2) {
-	// Calculate color distance in rgb using the 3-dimensional Pythagorean Theorem
-	const dr = r1 - r2,
-		dg = g1 - g2,
-		db = b1 - b2;
-	return dr * dr + dg * dg + db * db;
+	// Calculate color distance in the CIELAB color space
+	const rgbToLab = (r, g, b) => {
+		// Convert sRGB to linear RGB
+		let rL = r / 255,
+			gL = g / 255,
+			bL = b / 255;
+		rL = rL > 0.04045 ? Math.pow((rL + 0.055) / 1.055, 2.4) : rL / 12.92;
+		gL = gL > 0.04045 ? Math.pow((gL + 0.055) / 1.055, 2.4) : gL / 12.92;
+		bL = bL > 0.04045 ? Math.pow((bL + 0.055) / 1.055, 2.4) : bL / 12.92;
+
+		// Convert linear RGB to XYZ
+		let x = (rL * 0.4124 + gL * 0.3576 + bL * 0.1805) / 0.95047;
+		let y = (rL * 0.2126 + gL * 0.7152 + bL * 0.0722) / 1.0;
+		let z = (rL * 0.0193 + gL * 0.1192 + bL * 0.9505) / 1.08883;
+
+		// Convert XYZ to CIELAB
+		const f = (t) => (t > 0.008856 ? Math.pow(t, 1 / 3) : 7.787 * t + 16 / 116);
+		return [116 * f(y) - 16, 500 * (f(x) - f(y)), 200 * (f(y) - f(z))];
+	};
+
+	const [L1, A1, B_1] = rgbToLab(r1, g1, b1);
+	const [L2, A2, B_2] = rgbToLab(r2, g2, b2);
+
+	const dL = L1 - L2,
+		dA = A1 - A2,
+		dB = B_1 - B_2;
+	return dL * dL + dA * dA + dB * dB;
 }
 
 async function loadImage(filePath) {
@@ -376,8 +398,8 @@ function averageColor(pixels) {
 	return { r: Math.round(r / n), g: Math.round(g / n), b: Math.round(b / n) };
 }
 
-async function quantizeImage(imgData, paletteSize, forcedPalette) {
-	// Crushes an image down to a set palette, defined by the number of colors to use
+async function quantizeImage(imgData, paletteSize, forcedPalette, threshold = 200) {
+	// Crushes an image down to a set palette, defined by the number of colors to use (or for palette size 0 defined by the threshold of how close colors can get)
 	const { data, width, height } = imgData;
 	const pixels = [];
 	for (let i = 0; i < data.length; i += 4) {
@@ -385,12 +407,17 @@ async function quantizeImage(imgData, paletteSize, forcedPalette) {
 	}
 
 	let boxes = [pixels];
-	while (boxes.length < paletteSize) {
+	const isAuto = paletteSize === 0;
+	const maxAutoColors = 256;
+
+	while (isAuto ? boxes.length < maxAutoColors : boxes.length < paletteSize) {
 		let bestIndex = -1;
 		let bestRange = -1;
+
 		for (let i = 0; i < boxes.length; i++) {
 			const box = boxes[i];
-			if (box.length <= 1) continue;
+			if (box.length <= 1 || box.isTerminal) continue;
+
 			const { ranges } = channelRanges(box);
 			const boxBest = Math.max(...ranges);
 			if (boxBest > bestRange) {
@@ -398,45 +425,95 @@ async function quantizeImage(imgData, paletteSize, forcedPalette) {
 				bestIndex = i;
 			}
 		}
+
 		if (bestIndex === -1) break;
+
 		const boxToSplit = boxes.splice(bestIndex, 1)[0];
 		const [a, b] = splitBox(boxToSplit);
-		boxes.push(a);
+
+		if (isAuto && a.length > 0 && b.length > 0) {
+			const avgA = averageColor(a);
+			const avgB = averageColor(b);
+			const dist = distSq(avgA.r, avgA.g, avgA.b, avgB.r, avgB.g, avgB.b);
+
+			if (dist < threshold) {
+				boxToSplit.isTerminal = true;
+				boxes.push(boxToSplit);
+				continue;
+			}
+		}
+
+		if (a.length > 0) boxes.push(a);
 		if (b.length > 0) boxes.push(b);
+	}
+
+	if (isAuto) {
+		let merging = true;
+		while (merging) {
+			merging = false;
+			let closestDist = Infinity;
+			let mergeA = -1;
+			let mergeB = -1;
+
+			const currentAverages = boxes.map(averageColor);
+
+			for (let i = 0; i < boxes.length; i++) {
+				for (let j = i + 1; j < boxes.length; j++) {
+					const c1 = currentAverages[i];
+					const c2 = currentAverages[j];
+					const dist = distSq(c1.r, c1.g, c1.b, c2.r, c2.g, c2.b);
+
+					if (dist < closestDist) {
+						closestDist = dist;
+						mergeA = i;
+						mergeB = j;
+					}
+				}
+			}
+
+			if (closestDist < threshold) {
+				boxes[mergeA] = boxes[mergeA].concat(boxes[mergeB]);
+				boxes.splice(mergeB, 1);
+				merging = true;
+			}
+		}
 	}
 
 	const computedPalette = boxes.map(averageColor);
 
-	// If forcedPalette is provided use those colors first before populating with derived colors
+	const finalSize = isAuto ? computedPalette.length : paletteSize;
+
 	let finalPalette = [];
 	if (Array.isArray(forcedPalette) && forcedPalette.length > 0) {
 		finalPalette = forcedPalette.map((c) => ({ r: c.r, g: c.g, b: c.b }));
-		const remaining = Math.max(0, paletteSize - finalPalette.length);
+		const remaining = Math.max(0, finalSize - finalPalette.length);
+
 		for (let i = 0; i < Math.min(remaining, computedPalette.length); i++) {
 			finalPalette.push(computedPalette[i]);
 		}
-		while (finalPalette.length < paletteSize) {
+
+		while (finalPalette.length < finalSize) {
 			finalPalette.push(averageColor(pixels));
 		}
-		finalPalette = finalPalette.slice(0, paletteSize);
+
+		finalPalette = finalPalette.slice(0, finalSize);
 	} else {
-		finalPalette = computedPalette.slice(0, paletteSize);
+		finalPalette = computedPalette.slice(0, finalSize);
 	}
 
 	const paletteFreq = new Array(finalPalette.length).fill(0);
 	const out = Buffer.from(data);
+
 	for (let i = 0, pi = 0; i < out.length; i += 4, pi++) {
 		const pr = data[i],
 			pg = data[i + 1],
 			pb = data[i + 2];
 		let best = 0,
 			bestDist = Infinity;
+
 		for (let j = 0; j < finalPalette.length; j++) {
 			const c = finalPalette[j];
-			const dr = pr - c.r,
-				dg = pg - c.g,
-				db = pb - c.b;
-			const d = dr * dr + dg * dg + db * db;
+			const d = distSq(pr, pg, pb, c.r, c.g, c.b);
 			if (d < bestDist) {
 				bestDist = d;
 				best = j;
@@ -548,11 +625,10 @@ const questions = [
 	{
 		type: "input",
 		name: "paletteSize",
-		message: "🎨 Enter palette size:",
-		default: "16",
+		message: "🎨 Enter palette size (or leave blank for auto):",
 		validate: (input) => {
 			const val = parseInt(input);
-			return val > 1 ? true : "🤔 Palette size must be a positive number greater than 1";
+			return val > 1 || input == "" ? true : "🤔 Palette size must be a positive number greater than 1";
 		},
 	},
 	{
@@ -665,6 +741,8 @@ async function run() {
 	// Ask prompts
 	const answers = await inquirerModule.prompt(questions);
 
+	console.log("💭 Drawing image...");
+
 	// Load glyphs
 	let glyphs;
 	if (answers.fontChoice) {
@@ -693,7 +771,7 @@ async function run() {
 
 	try {
 		// Generate gradient or load input image
-		const paletteSize = Math.max(2, parseInt(answers.paletteSize) || 8);
+		const paletteSize = parseInt(answers.paletteSize) || 0;
 		let imgData;
 		let colorsArray = null;
 		if (answers.imageSetting === "🌈 Gradient") {
@@ -881,7 +959,7 @@ async function run() {
 				: path.basename(finalImagePath, path.extname(finalImagePath));
 		const outPath = path.join(
 			outDir,
-			`${base}-${paletteSize}col-${answers.fontChoice}${pixelSize ? "-" + pixelSize : ""}px${answers.messy ? "-m" : ""}${answers.solidBackground ? "-solid" : ""}.png`,
+			`${base}-${palette.length}col-${answers.fontChoice}${pixelSize ? "-" + pixelSize : ""}px${answers.messy ? "-m" : ""}${answers.solidBackground ? "-solid" : ""}.png`,
 		);
 
 		// Save image
@@ -911,4 +989,4 @@ async function loop() {
 	}
 }
 
-loop()
+loop();
