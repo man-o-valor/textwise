@@ -3,30 +3,36 @@
 		"font_name": "petscii",
 		"glyph_width": 8,
 		"glyph_height": 8,
-        "credit": "https://en.wikipedia.org/wiki/Commodore_64"
+		"credit": "https://en.wikipedia.org/wiki/Commodore_64"
 	},
-    {
+	{
 		"font_name": "frogblock",
 		"glyph_width": 8,
 		"glyph_height": 8,
-        "credit": "https://polyducks.itch.io/frogblock"
+		"credit": "https://polyducks.itch.io/frogblock"
 	},
-    {
+	{
 		"font_name": "dinobyte",
 		"glyph_width": 6,
 		"glyph_height": 8,
-        "credit": "https://mby.itch.io/dinobyte"
+		"credit": "https://mby.itch.io/dinobyte"
 	},
-    {
+	{
 		"font_name": "rook",
 		"glyph_width": 8,
 		"glyph_height": 8,
-        "credit": "https://outer-spec.itch.io/rook"
+		"credit": "https://outer-spec.itch.io/rook"
 	},
-    {
+	{
 		"font_name": "ursafont",
 		"glyph_width": 8,
 		"glyph_height": 8,
-        "credit": "https://ursafrank.itch.io/ursafont"
+		"credit": "https://ursafrank.itch.io/ursafont"
+	},
+	{
+		"font_name": "kitchensink",
+		"glyph_width": 6,
+		"glyph_height": 8,
+		"credit": "https://polyducks.itch.io/kitchen-sink-textmode-font"
 	}
 ]
